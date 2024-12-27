@@ -1,96 +1,126 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type Todo struct {
-	ID        int    `json:"id"`
-	COMPLETED bool   `json:"completed"`
-	BODY      string `json:"body"`
+	ID        primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
+	COMPLETED bool               `json:"completed"`
+	BODY      string             `json:"body"`
 }
 
-var todos = []Todo{}
+var colection *mongo.Collection
+
+func getTodos(c *fiber.Ctx) error {
+	var todos []Todo
+
+	cursor, err := colection.Find(context.Background(), bson.M{})
+
+	if err != nil {
+		return err
+	}
+
+	defer cursor.Close(context.Background()) // defer is used to postpone the execution of somenthing
+
+	for cursor.Next(context.Background()) {
+		var todo Todo
+
+		if err := cursor.Decode(&todo); err != nil {
+			return err
+		}
+
+		todos = append(todos, todo)
+	}
+	return c.JSON(todos)
+
+}
 
 func createTodo(c *fiber.Ctx) error {
-	newTodo := &Todo{}
+	todo := new(Todo)
 
-	if err := c.BodyParser(newTodo); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	if err := c.BodyParser(todo); err != nil {
+		return err
 	}
 
-	if newTodo.BODY == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "body is required")
+	if todo.BODY == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Todo's body cannot be empty"})
 	}
 
-	// Generate a new ID and add the todo to the slice
-	newTodo.ID = len(todos) + 1
-	todos = append(todos, *newTodo)
+	insertResult, err := colection.InsertOne(context.Background(), todo)
 
-	// Return the created todo as a response
-	return c.Status(fiber.StatusCreated).JSON(newTodo)
+	if err != nil {
+		return err
+	}
+
+	todo.ID = insertResult.InsertedID.(primitive.ObjectID)
+
+	return c.Status(fiber.StatusCreated).JSON(todo)
 }
 
-func updtadeTodo(c *fiber.Ctx) error {
-	id := c.Params("id")
+// func updateTodo (c * fiber.Ctx) error {
 
-	for i, todo := range todos {
-		if fmt.Sprint(todo.ID) == id {
-			todos[i].COMPLETED = !todos[i].COMPLETED
-			return c.Status(200).JSON(todos[i])
-		}
+// }
+// func deleteTodos (c * fiber.Ctx) error {
 
-	}
-	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Todo not found"})
-}
-
-func deleteTodo(c *fiber.Ctx) error {
-	id := c.Params("id")
-
-	for i, todo := range todos {
-		if fmt.Sprint(todo.ID) == id {
-			todos = append(todos[:i], todos[i+1:]...)
-			return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Todo successfully deleted"})
-		}
-	}
-	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Todo not found"})
-
-}
+// }
 
 func main() {
+	fmt.Println("Hello world")
+
 	err := godotenv.Load(".env")
 
 	if err != nil {
-		log.Fatal("Error loading .env variables")
+		log.Fatal("Error loading .env file: ", err)
 	}
+
+	MONGODB_URI := os.Getenv("MONGODB_URI")
+
+	clientOptions := options.Client().ApplyURI(MONGODB_URI)
+
+	client, err := mongo.Connect(context.Background(), clientOptions)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer client.Disconnect(context.Background())
+
+	err = client.Ping(context.Background(), nil)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Connected to MONGODB ATLAS")
+
+	colection = client.Database("golang_db").Collection("todos")
 
 	app := fiber.New()
 
 	api := app.Group("/api")
 
+	api.Get("todos", getTodos)
+	api.Post("todos", createTodo)
+	// api.Patch("todos", updateTodo)
+	// api.Delete("todos", deleteTodos)
+
 	PORT := os.Getenv("PORT")
 
-	log.Println("Server is running...")
+	if PORT == "" {
+		PORT = "3000"
+	}
 
-	api.Get("/todos", func(c *fiber.Ctx) error {
-		if len(todos) == 0 {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"message": "No todos found"})
-		}
-		return c.Status(fiber.StatusOK).JSON(todos)
-	})
+	log.Fatal(app.Listen("0.0.0.0:" + PORT))
 
-	api.Post("/todos", createTodo)
-
-	//update a todo
-	api.Patch("/todos/:id", updtadeTodo)
-
-	//delete a todo
-	api.Delete("/todos/:id", deleteTodo)
-
-	log.Fatal(app.Listen(":" + PORT))
 }
