@@ -61,7 +61,7 @@ func createTodo(c *fiber.Ctx) error {
 	insertResult, err := colection.InsertOne(context.Background(), todo)
 
 	if err != nil {
-		return err
+		return c.Status(500).JSON(fiber.Map{"error": err})
 	}
 
 	todo.ID = insertResult.InsertedID.(primitive.ObjectID)
@@ -83,7 +83,7 @@ func updateTodo(c *fiber.Ctx) error {
 	_, err = colection.UpdateOne(context.Background(), filter, update)
 
 	if err != nil {
-		return err
+		return c.Status(500).JSON(fiber.Map{"error": err})
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"success": "Todo successfully updated"})
@@ -117,7 +117,6 @@ func deleteTodos(c *fiber.Ctx) error {
 }
 
 func main() {
-	fmt.Println("Hello world")
 
 	err := godotenv.Load(".env")
 
@@ -136,7 +135,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	defer client.Disconnect(context.Background())
+	defer client.Disconnect(context.Background()) // defer is like to wait for somenthing to finish
 
 	err = client.Ping(context.Background(), nil)
 
@@ -166,7 +165,7 @@ func main() {
 	PORT := os.Getenv("PORT")
 
 	if PORT == "" {
-		PORT = "3000"
+		PORT = "8080"
 	}
 
 	log.Fatal(app.Listen("0.0.0.0:" + PORT))
